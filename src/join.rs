@@ -3,9 +3,9 @@
 use std;
 use std::cell::UnsafeCell;
 
-use hibitset::{BitIter, BitProducer, BitSetAnd, BitSetLike};
-use rayon::iter::ParallelIterator;
+use hibitset::{BitIter, BitProducer, BitSetAll, BitSetAnd, BitSetLike};
 use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
+use rayon::iter::ParallelIterator;
 use tuple_utils::Split;
 
 use world::{Entities, Entity, Index};
@@ -155,6 +155,61 @@ pub trait Join {
         JoinIter::new(self)
     }
 
+    /// Optionally gets a `Join` if it exists.
+    ///
+    /// ```
+    /// # use specs::prelude::*;
+    /// # #[derive(Debug, PartialEq)]
+    /// # struct Pos { x: i32, y: i32 } impl Component for Pos { type Storage = VecStorage<Self>; }
+    /// # #[derive(Debug, PartialEq)]
+    /// # struct Vel { x: i32, y: i32 } impl Component for Vel { type Storage = VecStorage<Self>; }
+    /// struct ExampleSystem;
+    /// impl<'a> System<'a> for ExampleSystem {
+    ///     type SystemData = (
+    ///         WriteStorage<'a, Pos>,
+    ///         ReadStorage<'a, Vel>,
+    ///     );
+    ///     fn run(&mut self, (mut positions, velocities): Self::SystemData) {
+    ///         for (mut position, maybe_velocity) in (&mut positions, velocities.maybe()).join() {
+    ///             if let Some(velocity) = maybe_velocity {
+    ///                 position.x += velocity.x;
+    ///                 position.y += velocity.y;
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// fn main() {
+    ///     let mut world = World::new();
+    ///     let mut dispatcher = DispatcherBuilder::new()
+    ///         .with(ExampleSystem, "example_system", &[])
+    ///         .build();
+    ///
+    ///     dispatcher.setup(&mut world.res);
+    ///
+    ///     let e1 = world.create_entity()
+    ///         .with(Pos { x: 0, y: 0 })
+    ///         .with(Vel { x: 5, y: 2 })
+    ///         .build();
+    ///
+    ///     let e2 = world.create_entity()
+    ///         .with(Pos { x: 0, y: 0 })
+    ///         .build();
+    ///
+    ///     dispatcher.dispatch(&mut world.res);
+    ///
+    ///     let positions = world.read_storage::<Pos>();
+    ///     assert_eq!(positions.get(e1), Some(&Pos { x: 5, y: 2 }));
+    ///     assert_eq!(positions.get(e2), Some(&Pos { x: 0, y: 0 }));
+    /// }
+    /// ```
+    fn maybe(self) -> MaybeJoin<Self>
+    where
+        Self: Sized,
+    {
+        MaybeJoin(self)
+    }
+
     /// Open this join by returning the mask and the storages.
     ///
     /// This is unsafe because implementations of this trait can permit
@@ -177,6 +232,31 @@ pub unsafe trait ParJoin: Join {
         Self: Sized,
     {
         JoinParIter(self)
+    }
+}
+
+/// Optionally gets a `Join`, for usage see [`Join::maybe()`].
+///
+/// [`Join::maybe()`]: ../join/trait.Join.html#method.maybe
+pub struct MaybeJoin<J: Join>(pub J);
+
+impl<T> Join for MaybeJoin<T>
+where
+    T: Join,
+{
+    type Type = Option<<T as Join>::Type>;
+    type Value = (<T as Join>::Mask, <T as Join>::Value);
+    type Mask = BitSetAll;
+    unsafe fn open(self) -> (Self::Mask, Self::Value) {
+        let (mask, value) = self.0.open();
+        (BitSetAll, (mask, value))
+    }
+    unsafe fn get((mask, value): &mut Self::Value, id: Index) -> Self::Type {
+        if mask.contains(id) {
+            Some(<T as Join>::get(value, id))
+        } else {
+            None
+        }
     }
 }
 
@@ -336,8 +416,7 @@ where
     J::Type: Send,
     J::Value: 'a + Send,
     J::Mask: 'a + Send + Sync,
-{
-}
+{}
 
 impl<'a, J> UnindexedProducer for JoinProducer<'a, J>
 where
