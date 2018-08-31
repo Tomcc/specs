@@ -84,7 +84,7 @@ where
             let mut add = vec![];
             {
                 let mut ids = |entity| -> Option<M> {
-                    if let Some((marker, added)) = allocator.mark(entity, markers) {
+                    if let Some((marker, added)) = allocator.mark(entity, markers, None) {
                         if added {
                             add.push((entity, marker.clone()));
                         }

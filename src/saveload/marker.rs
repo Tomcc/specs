@@ -38,16 +38,16 @@ pub trait MarkedBuilder {
     ///
     /// mark_entity(world.create_entity());
     /// ```
-    fn marked<M: Marker>(self) -> Self;
+    fn marked<M: Marker>(self, id: Option<M::Identifier>) -> Self;
 }
 
 impl<'a> MarkedBuilder for EntityBuilder<'a> {
-    fn marked<M>(self) -> Self
+    fn marked<M>(self, id: Option<M::Identifier>) -> Self
     where
         M: Marker,
     {
         let mut alloc = self.world.write_resource::<M::Allocator>();
-        alloc.mark(self.entity, &mut self.world.write_storage::<M>());
+        alloc.mark(self.entity, &mut self.world.write_storage::<M>(), id);
 
         self
     }
@@ -85,14 +85,16 @@ impl<'a> MarkedBuilder for LazyBuilder<'a> {
     ///
     /// Panics during `world.maintain()` in case there's no allocator
     /// added to the `World`.
-    fn marked<M>(self) -> Self
+    fn marked<M>(self, id: Option<M::Identifier>) -> Self
     where
         M: Marker,
     {
+        assert!(id.is_none(), "TODO: NOT IMPLEMENTED");
+
         let entity = self.entity;
         self.lazy.exec(move |world| {
             let mut alloc = world.write_resource::<M::Allocator>();
-            alloc.mark(entity, &mut world.write_storage::<M>());
+            alloc.mark(entity, &mut world.write_storage::<M>(), None);
         });
 
         self
@@ -127,11 +129,17 @@ impl<'a> EntityResBuilder<'a> {
     ///     .marked(&mut storage, &mut alloc)
     ///     .build();
     /// ```
-    pub fn marked<M>(self, storage: &mut WriteStorage<M>, alloc: &mut M::Allocator) -> Self
+    ///
+    pub fn marked<M>(
+        self,
+        storage: &mut WriteStorage<M>,
+        alloc: &mut M::Allocator,
+        id: Option<M::Identifier>,
+    ) -> Self
     where
         M: Marker,
     {
-        alloc.mark(self.entity, storage);
+        alloc.mark(self.entity, storage, id);
         self
     }
 }
@@ -342,12 +350,13 @@ pub trait MarkerAllocator<M: Marker>: Resource {
         &mut self,
         entity: Entity,
         storage: &'m mut WriteStorage<M>,
+        id: Option<M::Identifier>,
     ) -> Option<(&'m M, bool)> {
         if let Ok(entry) = storage.entry(entity) {
             let mut new = false;
             let marker = entry.or_insert_with(|| {
                 new = true;
-                self.allocate(entity, None)
+                self.allocate(entity, id)
             });
 
             Some((marker, new))
