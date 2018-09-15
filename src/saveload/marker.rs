@@ -38,7 +38,9 @@ pub trait MarkedBuilder {
     ///
     /// mark_entity(world.create_entity());
     /// ```
-    fn marked<M: Marker>(self, id: Option<M::Identifier>) -> Self;
+    fn marked<M: Marker>(self, id: Option<M::Identifier>) -> Self
+    where
+        M::Identifier: Send + Sync;
 }
 
 impl<'a> MarkedBuilder for EntityBuilder<'a> {
@@ -88,13 +90,12 @@ impl<'a> MarkedBuilder for LazyBuilder<'a> {
     fn marked<M>(self, id: Option<M::Identifier>) -> Self
     where
         M: Marker,
+        M::Identifier: Send + Sync,
     {
-        assert!(id.is_none(), "TODO: NOT IMPLEMENTED");
-
         let entity = self.entity;
         self.lazy.exec(move |world| {
             let mut alloc = world.write_resource::<M::Allocator>();
-            alloc.mark(entity, &mut world.write_storage::<M>(), None);
+            alloc.mark(entity, &mut world.write_storage::<M>(), id);
         });
 
         self
